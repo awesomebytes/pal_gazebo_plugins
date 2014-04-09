@@ -43,11 +43,15 @@
 #include <gazebo/math/gzmath.hh>
 #include <sdf/sdf.hh>
 
+#include "pal_gazebo_plugins/PalHandPlugin.h"
 #include <ros/ros.h>
 
 namespace gazebo {
 
-  GazeboPalHand::GazeboPalHand() {}
+  GazeboPalHand::GazeboPalHand() {
+
+
+  }
 
   // Destructor
   GazeboPalHand::~GazeboPalHand() {
@@ -141,17 +145,92 @@ namespace gazebo {
       gzthrow(error);
     }
 
+    // ros callback queue for processing subscription
+    this->deferredLoadThread_ = boost::thread(
+      boost::bind(&GazeboPalHand::DeferredLoad, this));
+
+  }
+
+  ////////////////////////////////////////////////////////////////////////////////
+  void GazeboPalHand::DeferredLoad()
+  {
+    // initialize ros
+    if (!ros::isInitialized())
+    {
+      gzerr << "Not loading plugin since ROS hasn't been "
+            << "properly initialized.  Try starting gazebo with ros plugin:\n"
+            << "  gazebo -s libgazebo_ros_api_plugin.so\n";
+      return;
+    }
+
+    // ros stuff
+    this->rosNode_ = new ros::NodeHandle("");
+
+    this->publisher_ = this->rosNode_->advertise<pal_gazebo_plugins::PalHandPlugin>("/" + this->robot_namespace_+ "/pal_hand/" + this->finger_joint_name_, 10);
+
+    // ros callback queue for processing subscription
+    this->callbackQueeuThread_ = boost::thread(
+      boost::bind(&GazeboPalHand::RosQueueThread, this));
+
     // listen to the update event (broadcast every simulation iteration)
     this->update_connection_ =
       event::Events::ConnectWorldUpdateBegin(
           boost::bind(&GazeboPalHand::UpdateChild, this));
+}
 
+  void GazeboPalHand::RosQueueThread()
+  {
+  //  static const double timeout = 0.01;
+    ros::Rate rate(1000);
+
+    while (this->rosNode_->ok())
+    {
+      this->rosQueue_.callAvailable(/*ros::WallDuration(timeout)*/);
+      rate.sleep();
+    }
   }
 
   // Update the controller
   void GazeboPalHand::UpdateChild() {
 
+    gzwarn << "\n\n ======== YEAAAAAAAH  =============\n";
+    pal_gazebo_plugins::PalHandPlugin message;
+    for(unsigned int i=0; i<4; ++i)
+    {
+      message.positions[i] =  joints[i]->GetAngle(0u).Radian();
+      message.forces[i]    = joints[i]->GetForce(0u);
+      for(unsigned int j=0; j<3; ++j)
+      {
+        message.joint_body1forces[i].forces.force[j]   =  joints[i]->GetForceTorque(0u).body1Force[j];
+        message.joint_body1forces[i].torques.torque[j] =  joints[i]->GetForceTorque(0u).body1Torque[j];
+
+        message.joint_body2forces[i].forces.force[j]   =  joints[i]->GetForceTorque(0u).body2Force[j];
+        message.joint_body2forces[i].torques.torque[j] =  joints[i]->GetForceTorque(0u).body2Torque[j];
+
+        message.joint_link_force_torques[i].forces.force[j] = joints[i]->GetLinkForce(0u)[j];
+        message.joint_link_force_torques[i].torques.torque[j] = joints[i]->GetLinkTorque(0u)[j];
+
+        message.child_link_world_force_torques[i].forces.force[j] = joints[i]->GetChild()->GetWorldForce()[j];
+        message.child_link_world_force_torques[i].torques.torque[j] = joints[i]->GetChild()->GetWorldTorque()[j];
+      }
+    }
+
+    publisher_.publish(message);
     math::Angle actuator_angle = joints[0]->GetAngle(0u);
+//    gzwarn << "\n\n ======== \n";
+//    gzwarn << "joints[0]->GetForce() = " << joints[0]->GetForce(0u) << "\n";
+//    gzwarn << "joints[1]->GetForce() = " << joints[1]->GetForce(0u) << "\n";
+//    gzwarn << "joints[2]->GetForce() = " << joints[2]->GetForce(0u) << "\n";
+//    gzwarn << "joints[3]->GetForce() = " << joints[3]->GetForce(0u) << "\n";
+//    gzwarn << "joints[0]->GetForceTorque(0u).body1Force  = " << joints[0]->GetForceTorque(0u).body1Force << "\n";
+//    gzwarn << "joints[0]->GetForceTorque(0u).body2Force = " << joints[0]->GetForceTorque(0u).body2Force << "\n";
+//    /* in gazebo ForceTorqueSensor plugin they use body2force and body2torque */
+//    gzwarn << "joints[0]->GetForceTorque(0u).body1Torque = " << joints[0]->GetForceTorque(0u).body1Torque << "\n";
+//    gzwarn << "joints[0]->GetForceTorque(0u).body2Torque = " << joints[0]->GetForceTorque(0u).body2Torque << "\n";
+//    gzwarn << "joints[0]->GetLinkForce() = " << joints[0]->GetLinkForce(0u) << "\n";
+//    gzwarn << "joints[0]->GetLinkTorque() = " << joints[0]->GetLinkTorque(0u) << "\n";
+//    gzwarn << " =================\n";
+
     math::Angle lower_limit    = math::Angle(0.02);
     if( actuator_angle > lower_limit)
     {

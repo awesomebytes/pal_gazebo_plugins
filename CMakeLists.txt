@@ -7,6 +7,10 @@ find_package(catkin REQUIRED COMPONENTS tf)
 find_package(gazebo REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 
+add_message_files(FILES Force.msg Torque.msg ForceTorque.msg PalHandPlugin.msg)
+
+generate_messages(DEPENDENCIES)
+
 include_directories(include ${catkin_INCLUDE_DIRS}
                             ${GAZEBO_INCLUDE_DIRS}
                             ${Boost_INCLUDE_DIRS}
@@ -18,6 +22,7 @@ catkin_package(
             gazebo_ros_forcetorque
             gazebo_pal_hand
   DEPENDS gazebo
+          message_runtime
   )
 
 link_directories(${GAZEBO_LIBRARY_DIRS})

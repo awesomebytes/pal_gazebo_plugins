@@ -40,6 +40,11 @@
 #include <gazebo/common/common.hh>
 #include <gazebo/physics/physics.hh>
 #include <control_toolbox/pid.h>
+#include <ros/ros.h>
+#include <ros/callback_queue.h>
+#include <ros/advertise_options.h>
+#include <ros/subscribe_options.h>
+#include <boost/thread.hpp>
 
 namespace gazebo {
 
@@ -58,6 +63,14 @@ namespace gazebo {
 
     private:
 
+      /// \brief ROS callback queue thread
+      void RosQueueThread();
+
+      /// \brief: thread out Load function with
+      /// with anything that might be blocking.
+      void DeferredLoad();
+
+
       physics::WorldPtr world;
       physics::ModelPtr parent;
       event::ConnectionPtr update_connection_;
@@ -70,6 +83,14 @@ namespace gazebo {
       physics::JointPtr joints[4];
 
       std::string robot_namespace_;
+
+  private: boost::thread deferredLoadThread_;
+
+      // ROS stuff
+  private: ros::NodeHandle* rosNode_;
+  private: ros::CallbackQueue rosQueue_;
+  private: boost::thread callbackQueeuThread_;
+  private: ros::Publisher  publisher_;
 
   };
 
