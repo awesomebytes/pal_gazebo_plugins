@@ -149,18 +149,26 @@ namespace gazebo {
     this->upper_joint_limit = 4.5;
     /// TODO: expose a parameter in SDF for max joint force and load it here
     /* This isn't actually force, it's the derivative of the force, when it jumps over 10 the pieces of the robot model start falling apart */
-    this->max_joint_force = 10.0; // empirically found, when the phallanges start to fly and jump out of position a value over 10 triggers
+    this->max_joint_force = 1900.0; // empirically found, when the phallanges start to fly and jump out of position a value over 500 triggers
     closing_angle.SetFromRadian(this->upper_joint_limit);
+    this->old_angle = joints[0]->GetAngle(0u);
 
 
-//    this->old_forces[0] = 0.0;
-//    this->old_forces[1] = 0.0;
-//    this->old_forces[2] = 0.0;
-//    this->old_forces[3] = 0.0;
 
     // ros callback queue for processing subscription
     this->deferredLoadThread_ = boost::thread(
       boost::bind(&GazeboPalHand::DeferredLoad, this));
+
+    /* Publisher stuff */
+//    // ros stuff
+//    this->rosNode_ = new ros::NodeHandle("");
+
+//    this->publisher_ = this->rosNode_->advertise<pal_gazebo_plugins::PalHandPlugin>("/" + this->robot_namespace_+ "/pal_hand/" + this->finger_joint_name_, 10);
+
+//    // ros callback queue for processing subscription
+//    this->callbackQueeuThread_ = boost::thread(
+//      boost::bind(&GazeboPalHand::RosQueueThread, this));
+    /* End of publisher stuff */
 
   }
 
@@ -183,25 +191,51 @@ namespace gazebo {
           boost::bind(&GazeboPalHand::UpdateChild, this));
 }
 
+/* Publisher stuff */
+//  void GazeboPalHand::RosQueueThread()
+//  {
+//  // static const double timeout = 0.01;
+//    ros::Rate rate(1000);
 
+//    while (this->rosNode_->ok())
+//    {
+//      this->rosQueue_.callAvailable(/*ros::WallDuration(timeout)*/);
+//      rate.sleep();
+//    }
+//  }
+
+/* End of publisher stuff */
 
   // Update the controller
   void GazeboPalHand::UpdateChild() {
+    if (ros::Time::now() < ros::Time(5,0)) /* don't do anything for the first 5s of simulation */
+              return;
 
     math::Angle actuator_angle = joints[0]->GetAngle(0u);
     double current_force = joints[0]->GetForce(0u);
     double force_dt = (current_force - this->old_force) / 0.001d; /* Gazebo loop runs at 1000Hz */
 
-    /* If we find out this value while closing, i.e. grasping an object, set the current angle as the maximum one */
-    if(fabs(force_dt) > this->max_joint_force )
+    /* Publisher stuff */
+//    pal_gazebo_plugins::PalHandPlugin message;
+//    message.positions[0] = actuator_angle.Radian();
+//    message.forces[0]    = current_force;
+//    message.forces_dt[0] = force_dt;
+//    publisher_.publish(message);
+    /* End of publisher stuff */
+
+    /* If we find out we overpass this value while closing, i.e. grasping an object, set the current angle as the maximum one */
+    if(fabs(force_dt) > this->max_joint_force && actuator_angle > old_angle && closing_angle.Radian() >= this->upper_joint_limit -0.001)
     {
         closing_angle = actuator_angle;
-        closing_angle = (closing_angle > this->lower_joint_limit) ? closing_angle : this->lower_joint_limit;
+        closing_angle.SetFromRadian((closing_angle.Radian() > this->lower_joint_limit) ? closing_angle.Radian() : this->lower_joint_limit);
+        gzwarn << "(closing) We overpassed max_joint_force in " << this->finger_joint_name_ << " actuator_angle = " << actuator_angle.Radian() << "  closing_angle = " << closing_angle.Radian() << "\n";
     }
     this->old_force =  current_force;
-    /* If the angle requested is lower than the angle where we blocked the finger, set up the max angle back to normal */
-    if(actuator_angle < closing_angle)
+    /* If the angle requested is lower than the angle where we blocked the finger, set up the max angle back to normal , i.e. we are opening */
+    if(actuator_angle < closing_angle && closing_angle.Radian() < this->upper_joint_limit && actuator_angle < old_angle){
+        gzwarn << "(opening) Setting back in " << this->finger_joint_name_ << " closing_angle to " << this->upper_joint_limit << "\n";
         closing_angle.SetFromRadian(this->upper_joint_limit);
+    }
 
     if(actuator_angle < closing_angle)
     {
@@ -224,6 +258,7 @@ namespace gazebo {
             joints[3]->SetAngle(0u, this->lower_joint_limit);
         }
     }
+    this->old_angle = actuator_angle;
   }
 
   GZ_REGISTER_MODEL_PLUGIN(GazeboPalHand)

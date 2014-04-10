@@ -82,6 +82,7 @@ namespace gazebo {
 
       physics::JointPtr joints[4];
       double old_force;
+      math::Angle old_angle;
       math::Angle closing_angle;
       double upper_joint_limit;
       double lower_joint_limit;
@@ -91,7 +92,7 @@ namespace gazebo {
 
   private: boost::thread deferredLoadThread_;
 
-      // ROS stuff
+      // ROS publisher stuff for debugging pourposes
 //  private: ros::NodeHandle* rosNode_;
 //  private: ros::CallbackQueue rosQueue_;
 //  private: boost::thread callbackQueeuThread_;
