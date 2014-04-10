@@ -81,6 +81,10 @@ namespace gazebo {
       std::string finger_3_joint_name_;
 
       physics::JointPtr joints[4];
+      double old_forces[4];
+      math::Angle closing_angle;
+      double upper_joint_limit;
+      double lower_joint_limit;
 
       std::string robot_namespace_;
 

@@ -50,7 +50,6 @@ namespace gazebo {
 
   GazeboPalHand::GazeboPalHand() {
 
-
   }
 
   // Destructor
@@ -145,6 +144,17 @@ namespace gazebo {
       gzthrow(error);
     }
 
+    //TODO: Load upper_joint_limit and lower_joint_limit from the upper and lower atribute of the limit element of the joint in the sdf
+    this->lower_joint_limit = 0.02;
+    this->upper_joint_limit = 4.5;
+    closing_angle.SetFromRadian(this->upper_joint_limit);
+
+
+//    this->old_forces[0] = 0.0;
+//    this->old_forces[1] = 0.0;
+//    this->old_forces[2] = 0.0;
+//    this->old_forces[3] = 0.0;
+
     // ros callback queue for processing subscription
     this->deferredLoadThread_ = boost::thread(
       boost::bind(&GazeboPalHand::DeferredLoad, this));
@@ -193,12 +203,24 @@ namespace gazebo {
   // Update the controller
   void GazeboPalHand::UpdateChild() {
 
-    gzwarn << "\n\n ======== YEAAAAAAAH  =============\n";
     pal_gazebo_plugins::PalHandPlugin message;
     for(unsigned int i=0; i<4; ++i)
     {
       message.positions[i] =  joints[i]->GetAngle(0u).Radian();
       message.forces[i]    = joints[i]->GetForce(0u);
+      message.forces_dt[i] = (float)(message.forces[i] - this->old_forces[i])/(0.001d);
+//      if (i == 0 && this->finger_joint_name_ ==   "hand_right_index_joint"){
+//        gzwarn << this->finger_joint_name_ << ":\n"
+//                 << " (message.forces[i] - old_forces[i])/(0.001d)\n"
+//                 << " (" << message.forces[i] << " - " <<  this->old_forces[i] << ")/(0.001d)\n"
+//                 << " (" << message.forces[i] - this->old_forces[i] << ")/(0.001d)\n"
+//                 << " " << (message.forces[i] - this->old_forces[i])/(0.001d) << "\n"
+//                 << " " << (float)(message.forces[i] - this->old_forces[i])/(0.001d) << "\n";
+
+//        gzwarn << "previous value of old_forces[0]: " <<  this->old_forces[0] << "\n"
+//               << "now we set the value: " << message.forces[0] << "\n";
+//        }
+      this->old_forces[i] =  message.forces[i];
       for(unsigned int j=0; j<3; ++j)
       {
         message.joint_body1forces[i].forces.force[j]   =  joints[i]->GetForceTorque(0u).body1Force[j];
@@ -215,39 +237,43 @@ namespace gazebo {
       }
     }
 
+
+
     publisher_.publish(message);
     math::Angle actuator_angle = joints[0]->GetAngle(0u);
-//    gzwarn << "\n\n ======== \n";
-//    gzwarn << "joints[0]->GetForce() = " << joints[0]->GetForce(0u) << "\n";
-//    gzwarn << "joints[1]->GetForce() = " << joints[1]->GetForce(0u) << "\n";
-//    gzwarn << "joints[2]->GetForce() = " << joints[2]->GetForce(0u) << "\n";
-//    gzwarn << "joints[3]->GetForce() = " << joints[3]->GetForce(0u) << "\n";
-//    gzwarn << "joints[0]->GetForceTorque(0u).body1Force  = " << joints[0]->GetForceTorque(0u).body1Force << "\n";
-//    gzwarn << "joints[0]->GetForceTorque(0u).body2Force = " << joints[0]->GetForceTorque(0u).body2Force << "\n";
-//    /* in gazebo ForceTorqueSensor plugin they use body2force and body2torque */
-//    gzwarn << "joints[0]->GetForceTorque(0u).body1Torque = " << joints[0]->GetForceTorque(0u).body1Torque << "\n";
-//    gzwarn << "joints[0]->GetForceTorque(0u).body2Torque = " << joints[0]->GetForceTorque(0u).body2Torque << "\n";
-//    gzwarn << "joints[0]->GetLinkForce() = " << joints[0]->GetLinkForce(0u) << "\n";
-//    gzwarn << "joints[0]->GetLinkTorque() = " << joints[0]->GetLinkTorque(0u) << "\n";
-//    gzwarn << " =================\n";
 
-    math::Angle lower_limit    = math::Angle(0.02);
-    if( actuator_angle > lower_limit)
+    /// TODO: expose a parametr in SDF for max joint force
+    double max_joint_force = 10.0; // empirically found, when the phallanges start to fly and jump out of position a value over 10 triggers
+    /* If we find out this value while closing, i.e. grasping an object, set the current angle as the maximum one */
+    if(fabs(message.forces_dt[0]) > max_joint_force )
     {
-      math::Angle index_1_angle = ( actuator_angle/2.5 > joints[1]->GetUpperLimit(0u) ) ? joints[1]->GetUpperLimit(0u) : actuator_angle/2.5;
-      joints[1]->SetAngle(0u, index_1_angle);
-
-      math::Angle index_2_angle = ( actuator_angle/3.2 > joints[2]->GetUpperLimit(0u) ) ? joints[2]->GetUpperLimit(0u) : actuator_angle/3.2;
-      joints[2]->SetAngle(0u, index_2_angle);
-
-      math::Angle index_3_angle = ( actuator_angle/3.2 > joints[3]->GetUpperLimit(0u) ) ? joints[3]->GetUpperLimit(0u) : actuator_angle/3.2;
-      joints[3]->SetAngle(0u, index_3_angle);
+        closing_angle = actuator_angle;
+        closing_angle = (closing_angle > this->lower_joint_limit) ? closing_angle : this->lower_joint_limit;
     }
-    else
+    /* If the angle requested is lower than the angle where we blocked the finger, set up the max angle back to normal */
+    if(actuator_angle < closing_angle)
+        closing_angle.SetFromRadian(this->upper_joint_limit);
+
+    if(actuator_angle < closing_angle)
     {
-      joints[1]->SetAngle(0u, lower_limit);
-      joints[2]->SetAngle(0u, lower_limit);
-      joints[3]->SetAngle(0u, lower_limit);
+
+        if( actuator_angle > this->lower_joint_limit)
+        {
+            math::Angle index_1_angle = ( actuator_angle/2.5 > joints[1]->GetUpperLimit(0u) ) ? joints[1]->GetUpperLimit(0u) : actuator_angle/2.5;
+            joints[1]->SetAngle(0u, index_1_angle);
+
+            math::Angle index_2_angle = ( actuator_angle/3.2 > joints[2]->GetUpperLimit(0u) ) ? joints[2]->GetUpperLimit(0u) : actuator_angle/3.2;
+            joints[2]->SetAngle(0u, index_2_angle);
+
+            math::Angle index_3_angle = ( actuator_angle/3.2 > joints[3]->GetUpperLimit(0u) ) ? joints[3]->GetUpperLimit(0u) : actuator_angle/3.2;
+            joints[3]->SetAngle(0u, index_3_angle);
+        }
+        else
+        {
+            joints[1]->SetAngle(0u, this->lower_joint_limit);
+            joints[2]->SetAngle(0u, this->lower_joint_limit);
+            joints[3]->SetAngle(0u, this->lower_joint_limit);
+        }
     }
   }
 
