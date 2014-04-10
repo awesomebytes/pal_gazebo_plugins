@@ -147,6 +147,9 @@ namespace gazebo {
     //TODO: Load upper_joint_limit and lower_joint_limit from the upper and lower atribute of the limit element of the joint in the sdf
     this->lower_joint_limit = 0.02;
     this->upper_joint_limit = 4.5;
+    /// TODO: expose a parameter in SDF for max joint force and load it here
+    /* This isn't actually force, it's the derivative of the force, when it jumps over 10 the pieces of the robot model start falling apart */
+    this->max_joint_force = 10.0; // empirically found, when the phallanges start to fly and jump out of position a value over 10 triggers
     closing_angle.SetFromRadian(this->upper_joint_limit);
 
 
@@ -173,14 +176,6 @@ namespace gazebo {
       return;
     }
 
-    // ros stuff
-    this->rosNode_ = new ros::NodeHandle("");
-
-    this->publisher_ = this->rosNode_->advertise<pal_gazebo_plugins::PalHandPlugin>("/" + this->robot_namespace_+ "/pal_hand/" + this->finger_joint_name_, 10);
-
-    // ros callback queue for processing subscription
-    this->callbackQueeuThread_ = boost::thread(
-      boost::bind(&GazeboPalHand::RosQueueThread, this));
 
     // listen to the update event (broadcast every simulation iteration)
     this->update_connection_ =
@@ -188,68 +183,22 @@ namespace gazebo {
           boost::bind(&GazeboPalHand::UpdateChild, this));
 }
 
-  void GazeboPalHand::RosQueueThread()
-  {
-  //  static const double timeout = 0.01;
-    ros::Rate rate(1000);
 
-    while (this->rosNode_->ok())
-    {
-      this->rosQueue_.callAvailable(/*ros::WallDuration(timeout)*/);
-      rate.sleep();
-    }
-  }
 
   // Update the controller
   void GazeboPalHand::UpdateChild() {
 
-    pal_gazebo_plugins::PalHandPlugin message;
-    for(unsigned int i=0; i<4; ++i)
-    {
-      message.positions[i] =  joints[i]->GetAngle(0u).Radian();
-      message.forces[i]    = joints[i]->GetForce(0u);
-      message.forces_dt[i] = (float)(message.forces[i] - this->old_forces[i])/(0.001d);
-//      if (i == 0 && this->finger_joint_name_ ==   "hand_right_index_joint"){
-//        gzwarn << this->finger_joint_name_ << ":\n"
-//                 << " (message.forces[i] - old_forces[i])/(0.001d)\n"
-//                 << " (" << message.forces[i] << " - " <<  this->old_forces[i] << ")/(0.001d)\n"
-//                 << " (" << message.forces[i] - this->old_forces[i] << ")/(0.001d)\n"
-//                 << " " << (message.forces[i] - this->old_forces[i])/(0.001d) << "\n"
-//                 << " " << (float)(message.forces[i] - this->old_forces[i])/(0.001d) << "\n";
-
-//        gzwarn << "previous value of old_forces[0]: " <<  this->old_forces[0] << "\n"
-//               << "now we set the value: " << message.forces[0] << "\n";
-//        }
-      this->old_forces[i] =  message.forces[i];
-      for(unsigned int j=0; j<3; ++j)
-      {
-        message.joint_body1forces[i].forces.force[j]   =  joints[i]->GetForceTorque(0u).body1Force[j];
-        message.joint_body1forces[i].torques.torque[j] =  joints[i]->GetForceTorque(0u).body1Torque[j];
-
-        message.joint_body2forces[i].forces.force[j]   =  joints[i]->GetForceTorque(0u).body2Force[j];
-        message.joint_body2forces[i].torques.torque[j] =  joints[i]->GetForceTorque(0u).body2Torque[j];
-
-        message.joint_link_force_torques[i].forces.force[j] = joints[i]->GetLinkForce(0u)[j];
-        message.joint_link_force_torques[i].torques.torque[j] = joints[i]->GetLinkTorque(0u)[j];
-
-        message.child_link_world_force_torques[i].forces.force[j] = joints[i]->GetChild()->GetWorldForce()[j];
-        message.child_link_world_force_torques[i].torques.torque[j] = joints[i]->GetChild()->GetWorldTorque()[j];
-      }
-    }
-
-
-
-    publisher_.publish(message);
     math::Angle actuator_angle = joints[0]->GetAngle(0u);
+    double current_force = joints[0]->GetForce(0u);
+    double force_dt = (current_force - this->old_force) / 0.001d; /* Gazebo loop runs at 1000Hz */
 
-    /// TODO: expose a parametr in SDF for max joint force
-    double max_joint_force = 10.0; // empirically found, when the phallanges start to fly and jump out of position a value over 10 triggers
     /* If we find out this value while closing, i.e. grasping an object, set the current angle as the maximum one */
-    if(fabs(message.forces_dt[0]) > max_joint_force )
+    if(fabs(force_dt) > this->max_joint_force )
     {
         closing_angle = actuator_angle;
         closing_angle = (closing_angle > this->lower_joint_limit) ? closing_angle : this->lower_joint_limit;
     }
+    this->old_force =  current_force;
     /* If the angle requested is lower than the angle where we blocked the finger, set up the max angle back to normal */
     if(actuator_angle < closing_angle)
         closing_angle.SetFromRadian(this->upper_joint_limit);

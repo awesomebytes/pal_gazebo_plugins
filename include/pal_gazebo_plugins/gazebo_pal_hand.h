@@ -81,20 +81,21 @@ namespace gazebo {
       std::string finger_3_joint_name_;
 
       physics::JointPtr joints[4];
-      double old_forces[4];
+      double old_force;
       math::Angle closing_angle;
       double upper_joint_limit;
       double lower_joint_limit;
+      double max_joint_force;
 
       std::string robot_namespace_;
 
   private: boost::thread deferredLoadThread_;
 
       // ROS stuff
-  private: ros::NodeHandle* rosNode_;
-  private: ros::CallbackQueue rosQueue_;
-  private: boost::thread callbackQueeuThread_;
-  private: ros::Publisher  publisher_;
+//  private: ros::NodeHandle* rosNode_;
+//  private: ros::CallbackQueue rosQueue_;
+//  private: boost::thread callbackQueeuThread_;
+//  private: ros::Publisher  publisher_;
 
   };
 
